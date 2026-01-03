@@ -21,6 +21,7 @@ export class ChatView extends ItemView {
   private conversationManager: ConversationManager;
   private streamingMessageId: string | null = null;
   private viewId: string;
+  private isCancelling = false;  // Flag to suppress error display during intentional cancel.
 
   constructor(leaf: WorkspaceLeaf, plugin: ClaudeCodePlugin) {
     super(leaf);
@@ -268,7 +269,17 @@ export class ChatView extends ItemView {
   }
 
   private async loadConversation(id: string) {
+    logger.info("ChatView", "loadConversation called", { id });
+
+    // Set flag to suppress error display during cancel.
+    this.isCancelling = true;
+
+    // Cancel any ongoing streaming.
+    this.agentController.cancelStream();
+
     const conv = await this.conversationManager.loadConversation(id);
+    logger.info("ChatView", "loadConversation result", { found: !!conv, messageCount: conv?.messageCount });
+
     if (conv) {
       this.messages = this.conversationManager.getDisplayMessages();
       if (conv.sessionId) {
@@ -285,7 +296,12 @@ export class ChatView extends ItemView {
       // Update tab title and header.
       (this.leaf as any).updateHeader?.();
       this.updateConversationDisplay();
+      logger.info("ChatView", "loadConversation rendered", { messageCount: this.messages.length });
+    } else {
+      logger.error("ChatView", "loadConversation failed - conversation not found", { id });
     }
+
+    this.isCancelling = false;
   }
 
   private updateConversationDisplay() {
@@ -411,8 +427,8 @@ export class ChatView extends ItemView {
       this.scrollToBottom();
     } catch (error) {
       const errorMessage = String(error);
-      const isAbort = (error as Error).name === "AbortError" || errorMessage.includes("aborted");
-      logger.error("ChatView", "Error sending message", { error: errorMessage, name: (error as Error).name, isAbort });
+      const isAbort = (error as Error).name === "AbortError" || errorMessage.includes("aborted") || this.isCancelling;
+      logger.error("ChatView", "Error sending message", { error: errorMessage, name: (error as Error).name, isAbort, isCancelling: this.isCancelling });
       if (!isAbort) {
         console.error("Error sending message:", error);
         this.showError(error instanceof Error ? error.message : "Unknown error");
@@ -557,6 +573,11 @@ export class ChatView extends ItemView {
   }
 
   async startNewConversation() {
+    logger.info("ChatView", "startNewConversation called");
+
+    // Set flag to suppress error display during cancel.
+    this.isCancelling = true;
+
     // Cancel any streaming.
     this.agentController.cancelStream();
 
@@ -568,12 +589,14 @@ export class ChatView extends ItemView {
     // Create new conversation.
     await this.conversationManager.createConversation();
 
-    // Re-render.
+    // Re-render (clear errors too).
     this.messagesContainerEl.empty();
     this.renderEmptyState();
+    logger.info("ChatView", "startNewConversation rendered empty state");
 
     this.isStreaming = false;
     this.streamingMessageId = null;
+    this.isCancelling = false;  // Clear the cancel flag.
     this.chatInput.updateState();
 
     // Update tab title and header.
