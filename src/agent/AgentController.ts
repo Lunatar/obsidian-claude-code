@@ -1,7 +1,7 @@
 import { query, SDKMessage, SDKAssistantMessage, SDKResultMessage, SDKSystemMessage, SDKPartialAssistantMessage } from "@anthropic-ai/claude-agent-sdk";
 import { App } from "obsidian";
 import type ClaudeCodePlugin from "../main";
-import { ChatMessage, ToolCall, AgentEvents, SubagentProgress } from "../types";
+import { ChatMessage, ToolCall, AgentEvents, SubagentProgress, ErrorType } from "../types";
 import { createObsidianMcpServer, ObsidianMcpServerInstance } from "./ObsidianMcpServer";
 import { logger } from "../utils/Logger";
 
@@ -19,6 +19,32 @@ interface ToolUseBlock {
 }
 
 type ContentBlock = TextBlock | ToolUseBlock;
+
+// Classify an error to determine if retry is appropriate.
+export function classifyError(error: Error): ErrorType {
+  const msg = error.message.toLowerCase();
+
+  // Transient errors - worth retrying.
+  if (msg.includes("process exited with code 1")) return "transient";
+  if (msg.includes("econnreset")) return "transient";
+  if (msg.includes("timeout")) return "transient";
+  if (msg.includes("rate limit") || msg.includes("429")) return "transient";
+  if (msg.includes("socket hang up")) return "transient";
+  if (msg.includes("etimedout")) return "transient";
+
+  // Auth errors - user needs to fix credentials.
+  if (msg.includes("unauthorized") || msg.includes("401")) return "auth";
+  if (msg.includes("invalid api key")) return "auth";
+  if (msg.includes("forbidden") || msg.includes("403")) return "auth";
+  if (msg.includes("authentication")) return "auth";
+
+  // Network errors - transient but different messaging.
+  if (msg.includes("network") || msg.includes("enotfound")) return "network";
+  if (msg.includes("dns") || msg.includes("getaddrinfo")) return "network";
+  if (msg.includes("econnrefused")) return "network";
+
+  return "permanent";
+}
 
 export class AgentController {
   private plugin: ClaudeCodePlugin;
@@ -55,9 +81,45 @@ export class AgentController {
     this.events = events;
   }
 
-  // Send a message and get a response using the Agent SDK.
-  async sendMessage(content: string): Promise<ChatMessage> {
-    logger.info("AgentController", "sendMessage called", { contentLength: content.length, preview: content.slice(0, 50) });
+  // Send a message with automatic retry for transient errors.
+  async sendMessage(content: string, maxRetries = 2): Promise<ChatMessage> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.sendMessageInternal(content);
+      } catch (error) {
+        lastError = error as Error;
+        const errorType = classifyError(lastError);
+
+        logger.warn("AgentController", `Attempt ${attempt + 1} failed`, {
+          errorType,
+          message: lastError.message,
+          willRetry: errorType === "transient" && attempt < maxRetries,
+        });
+
+        // Only retry transient errors.
+        if (errorType !== "transient" || attempt >= maxRetries) {
+          // Attach error type to the error for UI handling.
+          (lastError as any).errorType = errorType;
+          throw lastError;
+        }
+
+        // Wait before retry with exponential backoff (1s, 2s, 4s...).
+        await this.sleep(1000 * Math.pow(2, attempt));
+      }
+    }
+
+    throw lastError;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  // Internal send implementation - handles actual SDK query.
+  private async sendMessageInternal(content: string): Promise<ChatMessage> {
+    logger.info("AgentController", "sendMessageInternal called", { contentLength: content.length, preview: content.slice(0, 50) });
 
     this.abortController = new AbortController();
     this.events.onStreamingStart?.();
@@ -179,7 +241,10 @@ export class AgentController {
             }
           }
 
-          finalContent = text;
+          // Only update content if there's new text (preserves previous text when tool-only messages arrive).
+          if (text) {
+            finalContent = text;
+          }
 
           // Update tool calls.
           for (const tool of tools) {

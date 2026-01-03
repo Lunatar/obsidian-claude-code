@@ -358,9 +358,55 @@
   margin: 8px 0;
   background-color: var(--background-modifier-error);
   border: 1px solid var(--text-error);
-  border-radius: 6px;
-  color: var(--text-error);
+  border-radius: 8px;
+  color: var(--text-normal);
   font-size: 13px;
+}
+
+.claude-code-error-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-error);
+}
+
+.claude-code-error-suggestion {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.claude-code-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.claude-code-error-retry {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.claude-code-error-retry.mod-cta {
+  background-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+}
+
+.claude-code-error-retry.mod-cta:hover {
+  background-color: var(--interactive-accent-hover);
+}
+
+.claude-code-error-retry:not(.mod-cta) {
+  background-color: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.claude-code-error-retry:not(.mod-cta):hover {
+  background-color: var(--background-modifier-hover);
 }
 
 /* Empty State */

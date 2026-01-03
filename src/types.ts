@@ -40,6 +40,14 @@ export const DEFAULT_SETTINGS: ClaudeCodeSettings = {
   maxTurns: 50,
 };
 
+// Error classification for retry and display logic.
+export type ErrorType = "transient" | "auth" | "network" | "permanent";
+
+// Error with classification for better handling.
+export interface ClassifiedError extends Error {
+  errorType: ErrorType;
+}
+
 // Message roles for conversation.
 export type MessageRole = "user" | "assistant";
 

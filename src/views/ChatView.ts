@@ -1,9 +1,9 @@
 import { ItemView, WorkspaceLeaf, setIcon, Menu, ViewStateResult } from "obsidian";
-import { CHAT_VIEW_TYPE, ChatMessage, ToolCall, Conversation } from "../types";
+import { CHAT_VIEW_TYPE, ChatMessage, ToolCall, Conversation, ErrorType } from "../types";
 import type ClaudeCodePlugin from "../main";
 import { ChatInput } from "./ChatInput";
 import { MessageList } from "./MessageList";
-import { AgentController } from "../agent/AgentController";
+import { AgentController, classifyError } from "../agent/AgentController";
 import { ConversationManager } from "../agent/ConversationManager";
 import { ConversationHistoryModal } from "./ConversationHistoryModal";
 import { logger } from "../utils/Logger";
@@ -23,6 +23,7 @@ export class ChatView extends ItemView {
   private viewId: string;
   private isCancelling = false;  // Flag to suppress error display during intentional cancel.
   private activeStreamConversationId: string | null = null;  // Track which conversation owns the active stream.
+  private lastUserMessage: string | null = null;  // Store last message for retry functionality.
 
   constructor(leaf: WorkspaceLeaf, plugin: ClaudeCodePlugin) {
     super(leaf);
@@ -380,6 +381,9 @@ export class ChatView extends ItemView {
       return;
     }
 
+    // Store for retry functionality.
+    this.lastUserMessage = content.trim();
+
     // Add user message to UI.
     const userMessage: ChatMessage = {
       id: this.generateId(),
@@ -468,9 +472,20 @@ export class ChatView extends ItemView {
       const errorMessage = String(error);
       const isAbort = (error as Error).name === "AbortError" || errorMessage.includes("aborted") || this.isCancelling;
       logger.error("ChatView", "Error sending message", { error: errorMessage, name: (error as Error).name, isAbort, isCancelling: this.isCancelling });
+
+      // Remove the streaming placeholder message on error.
+      if (streamMsgId) {
+        const streamingIndex = this.messages.findIndex((m) => m.id === streamMsgId);
+        if (streamingIndex !== -1) {
+          this.messages.splice(streamingIndex, 1);
+        }
+      }
+      // Re-render without the placeholder.
+      this.messageList.render(this.messages);
+
       if (!isAbort) {
         console.error("Error sending message:", error);
-        this.showError(error instanceof Error ? error.message : "Unknown error");
+        this.showError(error instanceof Error ? error : new Error(errorMessage));
       }
     } finally {
       logger.info("ChatView", "handleSendMessage completed");
@@ -622,7 +637,7 @@ export class ChatView extends ItemView {
     if (error.name === "AbortError" || error.message.includes("aborted")) {
       return;
     }
-    this.showError(error.message);
+    this.showError(error);
   }
 
   private handleCancelStreaming() {
@@ -632,10 +647,154 @@ export class ChatView extends ItemView {
     this.chatInput.updateState();
   }
 
-  private showError(message: string) {
+  private showError(error: Error) {
+    // Get error type from attached property or classify.
+    const errorType: ErrorType = (error as any).errorType || classifyError(error);
+
+    let displayMessage: string;
+    let suggestion: string | null = null;
+
+    switch (errorType) {
+      case "auth":
+        displayMessage = "Authentication failed";
+        suggestion = "Check your API key in settings or verify your Claude Max subscription is active";
+        break;
+      case "network":
+        displayMessage = "Network error";
+        suggestion = "Check your internet connection and try again";
+        break;
+      case "transient":
+        displayMessage = "Claude encountered an unexpected error";
+        suggestion = "This usually resolves itself. Try again.";
+        break;
+      default:
+        displayMessage = error.message || "Unknown error";
+    }
+
     const errorEl = this.messagesContainerEl.createDiv({ cls: "claude-code-error" });
-    errorEl.setText(`Error: ${message}`);
+
+    const titleEl = errorEl.createDiv({ cls: "claude-code-error-title" });
+    titleEl.setText(displayMessage);
+
+    if (suggestion) {
+      const suggestionEl = errorEl.createDiv({ cls: "claude-code-error-suggestion" });
+      suggestionEl.setText(suggestion);
+    }
+
+    // Add retry button for transient and network errors.
+    if (errorType === "transient" || errorType === "network") {
+      const actionsEl = errorEl.createDiv({ cls: "claude-code-error-actions" });
+      const retryBtn = actionsEl.createEl("button", {
+        text: "Retry",
+        cls: "claude-code-error-retry mod-cta",
+      });
+      retryBtn.addEventListener("click", () => {
+        errorEl.remove();
+        this.retryLastMessage();
+      });
+    }
+
+    // Add settings link for auth errors.
+    if (errorType === "auth") {
+      const actionsEl = errorEl.createDiv({ cls: "claude-code-error-actions" });
+      const settingsBtn = actionsEl.createEl("button", {
+        text: "Open Settings",
+        cls: "claude-code-error-retry",
+      });
+      settingsBtn.addEventListener("click", () => {
+        (this.app as any).setting.open();
+        (this.app as any).setting.openTabById("obsidian-claude-code");
+      });
+    }
+
     this.scrollToBottom();
+  }
+
+  private async retryLastMessage() {
+    if (this.lastUserMessage) {
+      // Remove the last user message from the conversation (it was already added).
+      // We want to re-send the same message without duplicating it.
+      const lastIndex = this.messages.findIndex(
+        (m) => m.role === "user" && m.content === this.lastUserMessage
+      );
+      if (lastIndex !== -1) {
+        // Keep the user message, just retry sending.
+        await this.sendMessageWithContent(this.lastUserMessage);
+      }
+    }
+  }
+
+  private async sendMessageWithContent(content: string) {
+    // Start streaming.
+    this.isStreaming = true;
+    this.chatInput.updateState();
+
+    // Show "thinking" placeholder.
+    const placeholderId = this.generateId();
+    const placeholderMessage: ChatMessage = {
+      id: placeholderId,
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      isStreaming: true,
+    };
+    this.messages.push(placeholderMessage);
+    this.streamingMessageId = placeholderId;
+    this.messageList.render(this.messages);
+    this.scrollToBottom();
+
+    // Capture current conversation ID.
+    const currentConv = this.conversationManager.getCurrentConversation();
+    this.activeStreamConversationId = currentConv?.id || null;
+    const streamConvId = this.activeStreamConversationId;
+    const streamMsgId = this.streamingMessageId;
+
+    try {
+      const response = await this.agentController.sendMessage(content);
+
+      // Save to the conversation that started the stream.
+      if (streamConvId) {
+        await this.conversationManager.addMessageToConversation(streamConvId, response);
+        const sessionId = this.agentController.getSessionId();
+        if (sessionId) {
+          await this.conversationManager.updateSessionIdForConversation(streamConvId, sessionId);
+        }
+      }
+
+      // Only update UI if we're still viewing the same conversation.
+      const nowCurrentConv = this.conversationManager.getCurrentConversation();
+      if (nowCurrentConv?.id === streamConvId) {
+        const streamingIndex = this.messages.findIndex((m) => m.id === streamMsgId);
+        if (streamingIndex !== -1) {
+          this.messages[streamingIndex] = response;
+        } else {
+          this.messages.push(response);
+        }
+        this.messageList.render(this.messages);
+        this.scrollToBottom();
+      }
+    } catch (error) {
+      const errorMessage = String(error);
+      const isAbort = (error as Error).name === "AbortError" || errorMessage.includes("aborted") || this.isCancelling;
+
+      // Remove the streaming placeholder message on error.
+      if (streamMsgId) {
+        const streamingIndex = this.messages.findIndex((m) => m.id === streamMsgId);
+        if (streamingIndex !== -1) {
+          this.messages.splice(streamingIndex, 1);
+        }
+      }
+      this.messageList.render(this.messages);
+
+      if (!isAbort) {
+        this.showError(error instanceof Error ? error : new Error(errorMessage));
+      }
+    } finally {
+      this.isStreaming = false;
+      this.streamingMessageId = null;
+      this.activeStreamConversationId = null;
+      this.chatInput.updateState();
+    }
   }
 
   async startNewConversation() {
