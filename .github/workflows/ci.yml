@@ -65,9 +65,12 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           # Verify installation and create symlink to known path
           which claude || echo "claude not in PATH"
-          npm root -g
-          sudo ln -sf $(npm root -g)/../bin/claude /usr/local/bin/claude
+          CLAUDE_PATH=$(which claude)
+          echo "Claude installed at: $CLAUDE_PATH"
+          sudo ln -sf "$CLAUDE_PATH" /usr/local/bin/claude
           ls -la /usr/local/bin/claude
+          # Verify the symlink works
+          /usr/local/bin/claude --version || echo "Claude CLI test failed"
 
       - name: Run tests with coverage
         run: bun run test:coverage

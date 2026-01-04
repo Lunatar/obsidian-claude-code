@@ -12,18 +12,9 @@ vi.mock("@anthropic-ai/claude-agent-sdk", async () => {
   return mocks;
 });
 
-// Mock Node.js fs write operations for Logger tests.
-// Note: existsSync is NOT mocked - we rely on real file system checks
-// for Claude CLI detection. Only write operations are mocked.
-vi.mock("fs", async () => {
-  const actual = await vi.importActual<typeof import("fs")>("fs");
-  return {
-    ...actual,
-    appendFileSync: vi.fn(),
-    mkdirSync: vi.fn(),
-    writeFileSync: vi.fn(),
-  };
-});
+// Note: fs is NOT mocked globally - tests that need fs mocks should
+// set them up locally. This allows AgentController to use real fs.existsSync
+// for Claude CLI detection.
 
 beforeAll(() => {
   // Setup global DOM environment if needed.
